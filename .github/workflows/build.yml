@@ -99,11 +99,13 @@ jobs:
           import re
           p = 'Cargo.toml'
           s = open(p).read()
-          assert re.search(r'^\[dependencies\]', s, re.M), '[dependencies] section not found'
-          assert not re.search(r'^openssl-sys\s*=', s, re.M), 'openssl-sys already declared'
-          s = re.sub(r'^\[dependencies\]', '[dependencies]\nopenssl-sys = { version = "0.9", features = ["vendored"] }', s, count=1, flags=re.M)
+          assert not re.search(r'^\[dependencies\.openssl-sys\]', s, re.M), 'already declared'
+          m = re.search(r'^\[dependencies\.[^\]]+\]', s, re.M)
+          assert m, 'no [dependencies.*] section found (dotted-key style expected)'
+          block = '[dependencies.openssl-sys]\nversion = "0.9"\nfeatures = ["vendored"]\n\n'
+          s = s[:m.start()] + block + s[m.start():]
           open(p, 'w').write(s)
-          print('injected openssl-sys vendored dependency')
+          print('injected before', m.group(0))
           PY
           cargo update -p arti
           grep -n "openssl-sys" Cargo.toml Cargo.lock | head -5
