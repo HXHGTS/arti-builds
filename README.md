@@ -3,7 +3,12 @@
 **Arti**（Tor 官方 Rust 实现）的非官方跨平台 CI 构建仓库。
 
 - 源码：crates.io 官方发布包 `arti`（当前 `ARTI_VERSION = 2.7.0`，`--locked` 构建，不改动任何源码）
-- 触发：push 到 `main` / 手动 dispatch / 推送 `arti-v*` tag（tag 会发布 GitHub Release 并附全部产物 + sha256）
+- 触发与发布：
+  - push 到 `main` → 仅构建（artifacts）
+  - 推送 `arti-v*` tag → 构建并发布 Release（tag 名即 release 名）
+  - **每 3 天自动 Release**（每日 UTC 18:17 定时器 + epoch-day 取模闸门，跨月不错拍；release 名 `arti-v<版本>-r<YYYYMMDD>`）
+  - 手动 dispatch 勾选 `release=true` → 立即构建并发布 Release
+  - 同名 release 已存在时自动改为 `--clobber` 追加上传，重跑安全
 - 免责：非 Tor Project 官方二进制；来自官方源码 + 官方 Cargo.lock，TLS 栈统一 `rustls`（ring provider）。用于生产前请自行评估。
 
 ## 构建矩阵（11 个目标）
