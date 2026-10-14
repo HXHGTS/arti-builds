@@ -47,7 +47,7 @@
 
 ### OpenSSL 处理说明
 
-TLS 主栈是 rustls-ring，但 `opentelemetry`（OTLP 导出）→ `reqwest` → `native-tls` 的间接链会把 `openssl-sys` 拖进依赖树。为保全 OTLP 功能，**Linux 系所有目标显式开 `openssl-sys/vendored`**（OpenSSL 源码随二进制静态编译，不依赖系统 libssl）；Windows 的 native-tls 走系统 schannel，无需处理。
+TLS 主栈是 rustls-ring，但 `opentelemetry`（OTLP 导出）→ `reqwest` → `native-tls` 的间接链会把 `openssl-sys` 拖进依赖树。为保全 OTLP 功能，**构建时向 Cargo.toml 注入一行 `openssl-sys = { features = ["vendored"] }`（仅 Linux 目标）**，OpenSSL 源码随二进制静态编译、不依赖系统 libssl；随后 `cargo update -p arti` 刷新锁文件以维持 `--locked` 构建。Windows 的 native-tls 走系统 schannel，不做注入（避免引入 nasm/openssl 构建负担）。
 
 ## 使用
 
