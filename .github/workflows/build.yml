@@ -1,0 +1,160 @@
+name: build-arti
+
+on:
+  push:
+    branches: [main]
+    tags: ['arti-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ARTI_VERSION: '2.7.0'
+  CARGO_PROFILE_RELEASE_LTO: 'thin'
+  CARGO_PROFILE_RELEASE_STRIP: 'symbols'
+  CARGO_PROFILE_RELEASE_DEBUG: '0'
+  # Linux 系全功能集（对照 arti 2.7.0 的 65 个 feature：default 全含 +
+  # full 增量（去 async-std 双 runtime 与 journald）+ experimental 增量（去 opentelemetry 重复项），
+  # TLS provider 统一 rustls-ring（唯一覆盖全部交叉目标的组合）
+  FEATURES_LINUX: >-
+    tokio rustls-ring bridge-client compression dns-proxy flowctl-cc harden
+    onion-service-client pt-client vanguards http-connect onion-service-service
+    keymgr rpc restricted-discovery syslog opentelemetry-appender-tracing
+    counter-galois-onion ctor-keystore static-sqlite metrics hs-pow-full hsc
+    hsc-negotiate-extensions hss-negotiate-extensions onion-service-cli-extra
+    experimental-api tokio-console opentelemetry
+  # Windows 无 syslog（tracing syslog 走 unix socket）
+  FEATURES_WIN: >-
+    tokio rustls-ring bridge-client compression dns-proxy flowctl-cc harden
+    onion-service-client pt-client vanguards http-connect onion-service-service
+    keymgr rpc restricted-discovery opentelemetry-appender-tracing
+    counter-galois-onion ctor-keystore static-sqlite metrics hs-pow-full hsc
+    hsc-negotiate-extensions hss-negotiate-extensions onion-service-cli-extra
+    experimental-api tokio-console opentelemetry
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu,       cross: false, extra: 'journald' }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu,     cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: armv7-unknown-linux-gnueabihf, cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: i686-unknown-linux-gnu,        cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: riscv64gc-unknown-linux-gnu,   cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: powerpc64le-unknown-linux-gnu, cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl,     cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-musl,    cross: true,  extra: '' }
+          - { os: windows-2022, target: x86_64-pc-windows-msvc,        cross: false, extra: '' }
+          - { os: windows-2022, target: i686-pc-windows-msvc,          cross: false, extra: '' }
+          - { os: windows-2022, target: aarch64-pc-windows-msvc,       cross: false, extra: '' }
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Install libsystemd-dev (for journald)
+        if: matrix.extra == 'journald'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libsystemd-dev pkg-config
+
+      - name: Download arti source (crates.io official, locked)
+        shell: bash
+        run: |
+          curl -fsSLO "https://static.crates.io/crates/arti/arti-${ARTI_VERSION}.crate"
+          tar xzf "arti-${ARTI_VERSION}.crate"
+          mv "arti-${ARTI_VERSION}" arti-src
+
+      - name: Build (cross)
+        if: matrix.cross
+        working-directory: arti-src
+        run: cross build --release --locked --target ${{ matrix.target }} -p arti --no-default-features --features "${FEATURES_LINUX} ${{ matrix.extra }}"
+
+      - name: Build (native)
+        if: matrix.cross == false
+        working-directory: arti-src
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: |
+          FE="${FEATURES_LINUX}"
+          if [ "${RUNNER_OS}" = "Windows" ]; then FE="${FEATURES_WIN}"; fi
+          cargo build --release --locked --target ${{ matrix.target }} -p arti --no-default-features --features "${FE} ${{ matrix.extra }}"
+
+      - name: Package (linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          PKG="arti-v${ARTI_VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/${PKG}"
+          cp "target/${{ matrix.target }}/release/arti" "dist/${PKG}/"
+          cp arti-src/README.md dist/${PKG}/ 2>/dev/null || true
+          cp arti-src/LICENSE* dist/${PKG}/ 2>/dev/null || true
+          ( cd dist && tar czf "${PKG}.tar.gz" "${PKG}" && rm -rf "${PKG}" )
+          ( cd dist && sha256sum "${PKG}.tar.gz" > "${PKG}.tar.gz.sha256" )
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $pkg = "arti-v$env:ARTI_VERSION-$env:TARGET"
+          New-Item -ItemType Directory -Force -Path "dist/$pkg" | Out-Null
+          Copy-Item "target/$env:TARGET/release/arti.exe" "dist/$pkg/"
+          Copy-Item "arti-src/README.md" "dist/$pkg/" -ErrorAction SilentlyContinue
+          Copy-Item "arti-src/LICENSE*" "dist/$pkg/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/$pkg" -DestinationPath "dist/$pkg.zip" -Force
+          Remove-Item -Recurse -Force "dist/$pkg"
+          (Get-FileHash "dist/$pkg.zip" -Algorithm SHA256).Hash.ToLower() | Out-File "dist/$pkg.zip.sha256" -Ascii
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Arti v${ARTI_VERSION} full-feature cross builds (see README for the feature matrix). sha256 checksums included."
