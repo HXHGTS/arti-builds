@@ -2,10 +2,10 @@ name: build-arti
 
 on:
   push:
-    branches: [main]
-    tags: ['arti-v*']
+    tags: ['arti-v*']   # manual versioned releases only; commits to main do NOT trigger
   schedule:
-    # daily at 18:17 UTC; release gate below fires every 3rd day (epoch-day % 3 == 0)
+    # daily probe at 18:17 UTC; gates below fire every 15th day (build) and
+    # every 30th day (build + release), anchored to 2026-10-15 (epoch day 20741)
     - cron: '17 18 * * *'
   workflow_dispatch:
     inputs:
@@ -42,21 +42,30 @@ env:
     experimental-api tokio-console opentelemetry
 
 jobs:
-  # schedule-only gate: fires on every 3rd day (epoch-day modulo), so the
-  # monthly day-of-month gaps in cron never skew the 3-day cadence
+  # schedule-only gate: build every 15 days, release every 30 days
+  # (anchor 2026-10-15 = epoch day 20741; first hits: build 10-30, release 11-14)
   tick:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     outputs:
-      hit: ${{ steps.g.outputs.hit }}
+      hit15: ${{ steps.g.outputs.hit15 }}
+      hit30: ${{ steps.g.outputs.hit30 }}
     steps:
-      - name: Compute 3-day tick
+      - name: Compute 15/30-day ticks
         id: g
-        run: echo "hit=$(( $(date -u +%s) / 86400 % 3 == 0 ))" >> "$GITHUB_OUTPUT"
+        run: |
+          D=$(( $(date -u +%s) / 86400 ))
+          echo "hit15=$(( D > 20741 && (D - 20741) % 15 == 0 ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
+          echo "hit30=$(( D > 20741 && (D - 20741) % 30 == 0 ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
 
   build:
     needs: tick
-    if: ${{ !cancelled() && (needs.tick.result == 'skipped' || needs.tick.outputs.hit == 'true') }}
+    if: >-
+      !cancelled() && (
+        needs.tick.result == 'skipped' ||
+        needs.tick.outputs.hit15 == '1' ||
+        needs.tick.outputs.hit30 == '1'
+      )
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -184,10 +193,13 @@ jobs:
           retention-days: 90
 
   release:
-    needs: build
+    needs: [tick, build]
     if: >-
-      !cancelled() && needs.build.result == 'success' &&
-      (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || inputs.release == true)
+      !cancelled() && needs.build.result == 'success' && (
+        startsWith(github.ref, 'refs/tags/') ||
+        (github.event_name == 'schedule' && needs.tick.outputs.hit30 == '1') ||
+        inputs.release == true
+      )
     runs-on: ubuntu-24.04
     permissions:
       contents: write
