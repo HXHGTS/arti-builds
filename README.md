@@ -45,6 +45,10 @@
 | `native-tls` / `static-native-tls` | Linux 上需要交叉编译 OpenSSL（大坑）；Windows 上 schannel 与 rustls 功能等价 |
 | `static`（arti-client） | 语义不明且标记 non-additive；musl 本身已全静态，Windows 用 `+crt-static` |
 
+### OpenSSL 处理说明
+
+TLS 主栈是 rustls-ring，但 `opentelemetry`（OTLP 导出）→ `reqwest` → `native-tls` 的间接链会把 `openssl-sys` 拖进依赖树。为保全 OTLP 功能，**Linux 系所有目标显式开 `openssl-sys/vendored`**（OpenSSL 源码随二进制静态编译，不依赖系统 libssl）；Windows 的 native-tls 走系统 schannel，无需处理。
+
 ## 使用
 
 ```bash

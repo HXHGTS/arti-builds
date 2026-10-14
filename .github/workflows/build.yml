@@ -42,14 +42,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu,       cross: false, extra: 'journald' }
-          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu,     cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: armv7-unknown-linux-gnueabihf, cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: i686-unknown-linux-gnu,        cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: riscv64gc-unknown-linux-gnu,   cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: powerpc64le-unknown-linux-gnu, cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl,     cross: true,  extra: '' }
-          - { os: ubuntu-24.04, target: aarch64-unknown-linux-musl,    cross: true,  extra: '' }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu,       cross: false, extra: 'journald openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu,     cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: armv7-unknown-linux-gnueabihf, cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: i686-unknown-linux-gnu,        cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: riscv64gc-unknown-linux-gnu,   cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: powerpc64le-unknown-linux-gnu, cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl,     cross: true,  extra: 'openssl-sys/vendored' }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-musl,    cross: true,  extra: 'openssl-sys/vendored' }
           - { os: windows-2022, target: x86_64-pc-windows-msvc,        cross: false, extra: '' }
           - { os: windows-2022, target: i686-pc-windows-msvc,          cross: false, extra: '' }
           - { os: windows-2022, target: aarch64-pc-windows-msvc,       cross: false, extra: '' }
@@ -66,6 +66,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          cache-on-failure: true
 
       - name: Install cross
         if: matrix.cross
@@ -108,7 +109,7 @@ jobs:
         run: |
           PKG="arti-v${ARTI_VERSION}-${{ matrix.target }}"
           mkdir -p "dist/${PKG}"
-          cp "target/${{ matrix.target }}/release/arti" "dist/${PKG}/"
+          cp "arti-src/target/${{ matrix.target }}/release/arti" "dist/${PKG}/"
           cp arti-src/README.md dist/${PKG}/ 2>/dev/null || true
           cp arti-src/LICENSE* dist/${PKG}/ 2>/dev/null || true
           ( cd dist && tar czf "${PKG}.tar.gz" "${PKG}" && rm -rf "${PKG}" )
@@ -122,7 +123,7 @@ jobs:
         run: |
           $pkg = "arti-v$env:ARTI_VERSION-$env:TARGET"
           New-Item -ItemType Directory -Force -Path "dist/$pkg" | Out-Null
-          Copy-Item "target/$env:TARGET/release/arti.exe" "dist/$pkg/"
+          Copy-Item "arti-src/target/$env:TARGET/release/arti.exe" "dist/$pkg/"
           Copy-Item "arti-src/README.md" "dist/$pkg/" -ErrorAction SilentlyContinue
           Copy-Item "arti-src/LICENSE*" "dist/$pkg/" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist/$pkg" -DestinationPath "dist/$pkg.zip" -Force
