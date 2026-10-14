@@ -3,11 +3,11 @@
 **Arti**（Tor 官方 Rust 实现）的非官方跨平台 CI 构建仓库。
 
 - 源码：crates.io 官方发布包 `arti`（当前 `ARTI_VERSION = 2.7.0`，`--locked` 构建，不改动任何源码）
-- 触发与发布（**commit 推送不触发任何构建**）：
-  - **编译**：每 15 天自动（锚定 2026-10-15，首中 10-30）或手动 dispatch（`release=false` 仅构建出 artifacts）
-  - **发版**：每 30 天自动（首中 11-14，当天自动构建 + 发布）或手动 dispatch 勾选 `release=true`，或推 `arti-v*` tag（tag 名即 release 名）
-  - 定时机制：每日 UTC 18:17 探针 job 秒级退出，命中 15/30 天节拍才启动 11 目标构建；30 天命中日必落在 15 天节拍上
-  - schedule/dispatch 的 release 名 = `arti-v<版本>-r<YYYYMMDD>`；同名 release 已存在时自动 `--clobber` 追加上传，重跑安全
+- 触发与发布（**单一管线：编译 → 发版一条龙；commit/tag 推送一律不触发**）：
+  - **每 30 天自动**：锚定 2026-10-15，首中 **2026-11-14**，之后 12-14、2027-01-13……
+  - **手动**：Actions 页 dispatch，立即构建全部 11 目标并发布 Release
+  - 定时机制：每日 UTC 18:17 探针 job 秒级退出，命中 30 天节拍才启动完整管线
+  - Release 名 = `arti-v<版本>-r<YYYYMMDD>`；同名已存在时自动 `--clobber` 追加上传，重跑安全
 - 免责：非 Tor Project 官方二进制；来自官方源码 + 官方 Cargo.lock，TLS 栈统一 `rustls`（ring provider）。用于生产前请自行评估。
 
 ## 构建矩阵（11 个目标）

@@ -1,18 +1,11 @@
 name: build-arti
 
 on:
-  push:
-    tags: ['arti-v*']   # manual versioned releases only; commits to main do NOT trigger
   schedule:
-    # daily probe at 18:17 UTC; gates below fire every 15th day (build) and
-    # every 30th day (build + release), anchored to 2026-10-15 (epoch day 20741)
+    # daily probe at 18:17 UTC; gate below fires every 30th day (build + release),
+    # anchored to 2026-10-15 (epoch day 20741). Pushes never trigger this workflow.
     - cron: '17 18 * * *'
   workflow_dispatch:
-    inputs:
-      release:
-        description: 'Also publish a GitHub Release after build'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -42,30 +35,23 @@ env:
     experimental-api tokio-console opentelemetry
 
 jobs:
-  # schedule-only gate: build every 15 days, release every 30 days
-  # (anchor 2026-10-15 = epoch day 20741; first hits: build 10-30, release 11-14)
+  # schedule-only gate: single pipeline every 30 days (build then release)
+  # (anchor 2026-10-15 = epoch day 20741; first hit 2026-11-14)
   tick:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     outputs:
-      hit15: ${{ steps.g.outputs.hit15 }}
       hit30: ${{ steps.g.outputs.hit30 }}
     steps:
-      - name: Compute 15/30-day ticks
+      - name: Compute 30-day tick
         id: g
         run: |
           D=$(( $(date -u +%s) / 86400 ))
-          echo "hit15=$(( D > 20741 && (D - 20741) % 15 == 0 ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
           echo "hit30=$(( D > 20741 && (D - 20741) % 30 == 0 ? 1 : 0 ))" >> "$GITHUB_OUTPUT"
 
   build:
     needs: tick
-    if: >-
-      !cancelled() && (
-        needs.tick.result == 'skipped' ||
-        needs.tick.outputs.hit15 == '1' ||
-        needs.tick.outputs.hit30 == '1'
-      )
+    if: ${{ !cancelled() && (needs.tick.result == 'skipped' || needs.tick.outputs.hit30 == '1') }}
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -195,11 +181,8 @@ jobs:
   release:
     needs: [tick, build]
     if: >-
-      !cancelled() && needs.build.result == 'success' && (
-        startsWith(github.ref, 'refs/tags/') ||
-        (github.event_name == 'schedule' && needs.tick.outputs.hit30 == '1') ||
-        inputs.release == true
-      )
+      !cancelled() && needs.build.result == 'success' &&
+      (needs.tick.result == 'skipped' || needs.tick.outputs.hit30 == '1')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -215,11 +198,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           STAMP="$(date -u +%Y%m%d)"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="$GITHUB_REF_NAME"
-          else
-            TAG="arti-v${ARTI_VERSION}-r${STAMP}"
-          fi
+          TAG="arti-v${ARTI_VERSION}-r${STAMP}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release $TAG already exists, uploading with --clobber"
             gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
