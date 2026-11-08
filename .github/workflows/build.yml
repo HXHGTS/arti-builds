@@ -209,3 +209,23 @@ jobs:
               --notes "Arti v${ARTI_VERSION} full-feature cross builds (auto build ${STAMP}). sha256 checksums included. See README for the feature matrix."
           fi
           ls -la dist/
+
+  cleanup:
+    needs: release
+    # Build artifacts feed the release job only; the release carries the downloadable binaries.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete build artifacts for this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[].id')
+          for id in $ids; do
+            gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id"
+          done
